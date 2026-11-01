@@ -7,7 +7,16 @@ import os
 import sys
 from typing import Any
 
-from .agent import DEFAULT_MODEL, Agent, AgentConfig, Hooks, make_client
+from .agent import Agent, AgentConfig, Hooks
+from .providers import (
+    DEFAULT_OLLAMA_MODEL,
+    PROVIDERS,
+    OllamaClient,
+    ProviderError,
+    default_model,
+    default_provider,
+    make_client,
+)
 from .tools import Workspace
 
 PREVIEW_LIMIT = 600
@@ -114,10 +123,30 @@ def build_parser() -> argparse.ArgumentParser:
         "-w", "--workspace", default=".", help="Diretório do projeto (padrão: o atual)."
     )
     parser.add_argument(
+        "-p",
+        "--provider",
+        choices=PROVIDERS,
+        default=None,
+        help="Modelo por trás do agente. Padrão: 'anthropic' se ANTHROPIC_API_KEY "
+        "estiver definida; senão 'ollama' (modelo local, sem chave).",
+    )
+    parser.add_argument(
         "-m",
         "--model",
-        default=os.environ.get("AI_CODE_AGENT_MODEL", DEFAULT_MODEL),
-        help=f"Modelo a usar (padrão: {DEFAULT_MODEL}; ou defina AI_CODE_AGENT_MODEL).",
+        default=None,
+        help=f"Modelo a usar (padrão: {DEFAULT_OLLAMA_MODEL} no ollama, claude-sonnet-5-5 "
+        "na anthropic; ou defina AI_CODE_AGENT_MODEL).",
+    )
+    parser.add_argument(
+        "--host",
+        default=None,
+        help="Endereço do servidor Ollama (padrão: OLLAMA_HOST ou http://localhost:11434).",
+    )
+    parser.add_argument(
+        "--num-ctx",
+        type=int,
+        default=None,
+        help="Janela de contexto pedida ao Ollama, em tokens (padrão: 16384).",
     )
     parser.add_argument(
         "-y",
@@ -167,13 +196,26 @@ def _repl(agent: Agent) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("Erro: defina a variável de ambiente ANTHROPIC_API_KEY.", file=sys.stderr)
+    provider = args.provider or default_provider()
+    model = args.model or default_model(provider)
+    if provider == "anthropic" and not os.environ.get("ANTHROPIC_API_KEY"):
+        print(
+            "Erro: defina ANTHROPIC_API_KEY ou use o modelo local sem chave: "
+            "ai-code-agent --provider ollama",
+            file=sys.stderr,
+        )
         return 2
     try:
         workspace = Workspace(args.workspace)
-        client = make_client()
-    except (ValueError, RuntimeError) as exc:
+        client = make_client(provider, host=args.host, num_ctx=args.num_ctx)
+        if isinstance(client, OllamaClient) and not client.has_model(model):
+            print(
+                f"Erro: o modelo '{model}' ainda não foi baixado no Ollama.\n"
+                f"Rode primeiro: ollama pull {model}",
+                file=sys.stderr,
+            )
+            return 2
+    except (ValueError, ProviderError) as exc:
         print(f"Erro: {exc}", file=sys.stderr)
         return 2
 
@@ -181,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         workspace,
         client=client,
         config=AgentConfig(
-            model=args.model,
+            model=model,
             max_tokens=args.max_tokens,
             max_turns=args.max_turns,
             auto_approve=args.yes,
@@ -194,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             approve=Approver(),
         ),
     )
-    print(f"Workspace: {workspace.root}\nModelo: {args.model}")
+    print(f"Workspace: {workspace.root}\nModelo: {model} ({provider})")
     if args.yes:
         print("[aviso] aprovação automática ligada: edições e comandos rodam sem perguntar.")
 

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from ai_code_agent import Agent, AgentConfig, Hooks, Workspace
-from ai_code_agent.cli import describe_call, main
+from ai_code_agent.cli import describe_call
 
 
 class FakeMessages:
@@ -252,9 +252,3 @@ def test_describe_call_shows_what_will_happen():
     assert "x.py" in describe_call("write_file", {"path": "x.py", "content": "a = 1"})
     edit = describe_call("edit_file", {"path": "x.py", "old_string": "a", "new_string": "b"})
     assert "--- remover" in edit and "+++ inserir" in edit
-
-
-def test_cli_requires_api_key(monkeypatch, capsys):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    assert main(["ola"]) == 2
-    assert "ANTHROPIC_API_KEY" in capsys.readouterr().err

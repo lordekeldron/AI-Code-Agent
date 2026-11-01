@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .providers import DEFAULT_ANTHROPIC_MODEL, default_model, default_provider, make_client
 from .tools import Tool, Workspace, build_tools, execute_tool
 
-DEFAULT_MODEL = "claude-sonnet-5-5"
+DEFAULT_MODEL = DEFAULT_ANTHROPIC_MODEL
 
 SYSTEM_PROMPT = """You are AI Code Agent, an autonomous software engineering assistant. You work inside a single project directory (the workspace) on the user's machine and can read, search, create and edit files and run shell commands through the provided tools.
 
@@ -51,17 +52,6 @@ class Hooks:
     approve: Callable[[str, dict[str, Any]], bool] | None = None
 
 
-def make_client() -> Any:
-    """Cria o cliente da Anthropic (lê ANTHROPIC_API_KEY do ambiente)."""
-    try:
-        import anthropic
-    except ImportError as exc:
-        raise RuntimeError(
-            "O pacote 'anthropic' não está instalado. Rode: pip install anthropic"
-        ) from exc
-    return anthropic.Anthropic()
-
-
 def _block_to_param(block: Any) -> dict[str, Any] | None:
     """Converte um bloco da resposta em um bloco aceito de volta pela API."""
     kind = getattr(block, "type", None)
@@ -92,7 +82,12 @@ class Agent:
         tools: dict[str, Tool] | None = None,
     ) -> None:
         self.workspace = workspace
-        self.client = client if client is not None else make_client()
+        if client is None:
+            provider = default_provider()
+            client = make_client(provider)
+            if config is None:
+                config = AgentConfig(model=default_model(provider))
+        self.client = client
         self.config = config or AgentConfig()
         self.hooks = hooks or Hooks()
         self.tools = tools if tools is not None else build_tools()
